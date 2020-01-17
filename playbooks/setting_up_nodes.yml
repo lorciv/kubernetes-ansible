@@ -1,0 +1,132 @@
+---
+- hosts: all
+  vars_files:
+  - ../env_variables
+  become: yes
+  tasks:
+  
+  - name: Installing firewalld
+    yum:
+      name: firewalld
+      state: present
+
+  - name: Add Docker repo
+    get_url:
+      url: https://download.docker.com/linux/centos/docker-ce.repo
+      dest: /etc/yum.repos.d/docker-ce.repo
+ 
+  - name: Installing Docker prerequisites
+    yum:
+      name:
+        - yum-utils
+        - device-mapper-persistent-data
+        - lvm2
+      state: present
+
+  - name: Installing Docker
+    yum:
+      name: "{{ item }}"
+      state: present
+    with_items: "{{docker_packages}}"
+
+  - name: Create Docker Config Folders
+    file:
+      path: "{{ item }}"
+      state: directory
+    with_items:
+      - '/etc/docker'
+      - '/etc/systemd/system/docker.service.d'
+
+  - name: Creating a config file for Docker
+    file:
+     path: /etc/docker/daemon.json-file
+     state: touch
+
+  - name: Setup Docker Daemon
+    blockinfile:
+     path: /etc/docker/daemon.json-file
+     block: |
+      {
+        "exec-opts": ["native.cgroupdriver=systemd"],
+        "log-driver": "json-file",
+        "log-opts": {
+            "max-size": "100m"
+        },
+        "storage-driver": "overlay2",
+        "storage-opts": [
+            "overlay2.override_kernel_check=true"
+        ]
+      }
+ 
+  - name: Force systemd to reread configs and restart Docker daemon
+    systemd:
+      state: restarted
+      daemon_reload: yes
+      name: docker
+  
+  - name: Starting and enabling firewalld
+    service:
+      name: firewalld
+      state: started
+      enabled: yes    
+  
+  - name: Allow Network Ports in Firewalld
+    firewalld:
+      port: "{{ item }}"
+      state: enabled
+      permanent: yes
+      immediate: yes
+    with_items: "{{ ports }}"
+
+  - name: Creating a config file for Kubernetes bridge firewall rules
+    file:
+      path: /etc/sysctl.d/k8s.conf
+      state: touch  
+  
+  - name: Enabling Bridge Firewall Rule
+    blockinfile:
+      path: /etc/sysctl.d/k8s.conf
+      block: |
+        net.bridge.bridge-nf-call-ip6tables = 1
+        net.bridge.bridge-nf-call-iptables = 1
+
+  - name: Completing Bridge Firewall Rule Activation
+    shell:
+      sysctl --system  
+    
+  - name: Creating a repository file for Kubernetes
+    file:
+      path: /etc/yum.repos.d/kubernetes.repo
+      state: touch
+
+  - name: Adding repository details in Kubernetes repo file.
+    blockinfile:
+      path: /etc/yum.repos.d/kubernetes.repo
+      block: |
+       [kubernetes]
+       name=Kubernetes
+       baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+       enabled=1
+       gpgcheck=1
+       repo_gpgcheck=1
+       gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg
+        https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+  
+  - name: Disable SELinux
+    selinux:
+      state: disabled
+        
+  - name: Installing Kubernetes
+    yum:
+      name: "{{ item }}"
+      state: present
+    with_items: "{{ kube_packages }}"
+
+  - name: Starting and Enabling the required services
+    service:
+      name: "{{ item }}"
+      state: started
+      enabled: yes
+    with_items: "{{ services }}"
+
+  

@@ -1,0 +1,23 @@
+---
+- hosts: all
+  vars_files:
+  - env_variables
+  become: yes
+  tasks:
+  - name: Clear Kubernetes nodes
+    shell: |
+     kubeadm reset -f
+     systemctl stop kubelet
+     systemctl stop docker
+     iptables --flush
+     iptables -tnat --flush
+     rm -rf /var/lib/cni/
+     rm -rf /run/flannel
+     rm -rf /var/lib/kubelet/*
+     rm -rf /etc/cni/
+     ifconfig cni0 down & ip link delete cni0
+     brctl delbr cni0
+     ifconfig flannel.1 down & ip link delete flannel.1
+     ifconfig docker0 down
+     systemctl start kubelet
+     systemctl start docker
